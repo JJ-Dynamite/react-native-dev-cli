@@ -14,6 +14,8 @@ const { alignDeps } = require('./upgradeFunctions');
 const os = require('os');
 const dirTree = require('directory-tree');
 const treeify = require('treeify');
+const Anthropic = require('@anthropic-ai/sdk');
+const Groq = require('groq-sdk');
 
 let inquirer;
 
@@ -306,28 +308,6 @@ async function applyUpgradeChanges(upgradePlan, diffContent, appName, appPackage
     console.log(`Patches generated. Contents of ${patchesDir}:`);
     patchFiles.forEach(file => console.log(` - ${file}`));
 
-    // Save diffContent to a temporary file
-    const patchFilePath = path.join(patchesDir, 'upgrade.patch');
-    await fs.writeFile(patchFilePath, diffContent);
-
-    console.log('Applying patch...');
-    try {
-      execSync(`patch -p1 < "${patchFilePath}"`, { stdio: 'inherit' });
-      console.log('Patch applied successfully.');
-    } catch (error) {
-      console.error('Error applying patch:', error.message);
-      console.log('Attempting to apply patch with --reject-file option...');
-      try {
-        execSync(`patch -p1 --reject-file=- < "${patchFilePath}"`, { stdio: 'inherit' });
-        console.log('Patch applied with reject file option. Please check for .rej files.');
-      } catch (rejectError) {
-        console.error('Error applying patch with reject file option:', rejectError.message);
-      }
-    }
-
-    // Remove the temporary patch file
-    await fs.unlink(patchFilePath);
-
     // Apply changes using generated patches
     for (const step of upgradePlan.steps) {
       console.log(`\nStep: ${step.description}`);
@@ -482,100 +462,103 @@ async function applyPatchFile(change, patchesDir, appName, appPackage, inquirer)
   const tempPatchFile = path.join(patchesDir, `temp_${patchFileName}`);
   await fs.writeFile(tempPatchFile, updatedPatchContent);
 
-  // Determine the actual file path
-  const actualFilePath = path.join(process.cwd(), filePath);
-
-  // Apply the patch to the file
-  await applyPatchToFile(actualFilePath, tempPatchFile);
-}
-
-async function applyPatchToFile(filePath, patchFile) {
+  // Apply the patch using Git's apply command
   try {
-    // Ensure the directory exists
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-
-    // Check if the file exists, if not, create an empty file
-    let originalContent = '';
-    try {
-      originalContent = await fs.readFile(filePath, 'utf8');
-    } catch (error) {
-      if (error.code === 'ENOENT') {
-        await fs.writeFile(filePath, '');
-        console.log(`Created empty file: ${filePath}`);
-      } else {
-        throw error;
-      }
-    }
-
-    // Read and parse the patch content
-    const patchContent = await fs.readFile(patchFile, 'utf8');
-    const parsedPatch = parsePatch(patchContent);
-
-    if (parsedPatch.length === 0) {
-      console.log(`No valid patch content found in ${patchFile}. Skipping.`);
-      return;
-    }
-
-    // Apply the patch
-    const patchedContent = applyPatch(originalContent, parsedPatch[0]);
-
-    if (patchedContent === false) {
-      throw new Error('Failed to apply patch');
-    }
-
-    // Write the patched content back to the file
-    await fs.writeFile(filePath, patchedContent);
+    execSync(`git apply ${tempPatchFile}`, { stdio: 'inherit' });
     console.log(`Patch applied successfully to ${filePath}.`);
-    console.log('The following changes were made:');
-    console.log(patchContent);  // This will show the actual changes
-
   } catch (error) {
-    console.error(`Error applying patch to ${filePath}:`, error.message);
-    console.log('Attempting manual edit...');
-    await manualEdit(filePath, patchFile);
+    console.error(`Error applying patch to ${filePath} using git apply:`, error.message);
+    console.log('Attempting to use AI to apply the patch...');
+    await applyPatchUsingAI(filePath, patchFilePath);
   } finally {
     // Clean up the temporary patch file
-    await fs.unlink(patchFile);
+    await fs.unlink(tempPatchFile);
   }
+}
+
+async function applyPatchUsingAI(filePath, patchFilePath) {
+  const originalContent = await fs.readFile(filePath, 'utf8');
+  const patchContent = await fs.readFile(patchFilePath, 'utf8');
+
+  const prompt = `
+  Original file content:
+  ${originalContent}
+
+  Patch content:
+  ${patchContent}
+
+  Apply the patch to the original file content and provide the updated file content.
+  `;
+
+  const apiKeys = [
+    { key: process.env.OPENAI_API_KEY, url: 'https://api.openai.com/v1/completions', model: 'gpt-4o-2024-08-06' },
+    { key: process.env.ANTHROPIC_API_KEY, type: 'anthropic', model: 'claude-3-5-sonnet-20240620' },
+    { key: process.env.DEEPSEEK_API_KEY, url: 'https://api.deepseek.com/v1/completions', model: 'deepseek/deepseek-coder' },
+    { key: process.env.GROQ_API_KEY, type: 'groq', model: 'llama3-8b-8192' }
+  ];
+
+  for (const api of apiKeys) {
+    try {
+      let patchedContent;
+
+      if (api.type === 'anthropic') {
+        const anthropic = new Anthropic({ apiKey: api.key });
+        const response = await anthropic.messages.create({
+          model: api.model,
+          max_tokens: 2048,
+          messages: [{ role: "user", content: prompt }],
+        });
+        patchedContent = response.content[0].text;
+      } else if (api.type === 'groq') {
+        const groq = new Groq({ apiKey: api.key });
+        const response = await groq.chat.completions.create({
+          messages: [{ role: "user", content: prompt }],
+          model: api.model,
+        });
+        patchedContent = response.choices[0]?.message?.content;
+      } else {
+        const response = await axios.post(
+          api.url,
+          {
+            model: api.model,
+            prompt: prompt,
+            max_tokens: 2048,
+            temperature: 0.5,
+          },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${api.key}`,
+            },
+          }
+        );
+        patchedContent = response.data.choices[0].text.trim();
+      }
+
+      if (patchedContent) {
+        await fs.writeFile(filePath, patchedContent);
+        console.log(`Patch applied successfully to ${filePath} using AI (${api.model}).`);
+        return;
+      }
+    } catch (error) {
+      console.error(`Error applying patch to ${filePath} using ${api.model}:`, error.message);
+    }
+  }
+
+  console.log('All AI attempts failed. Attempting manual edit...');
+  await manualEdit(filePath, patchFilePath);
 }
 
 function parsePatch(patchContent) {
-  // Simple patch parser (you might want to use a more robust library for this)
-  const lines = patchContent.split('\n');
-  const patches = [];
-  let currentPatch = null;
-
-  for (const line of lines) {
-    if (line.startsWith('--- ') || line.startsWith('+++ ')) {
-      if (currentPatch) patches.push(currentPatch);
-      currentPatch = { hunks: [] };
-    } else if (line.startsWith('@@ ')) {
-      if (currentPatch) currentPatch.hunks.push({ lines: [] });
-    } else if (currentPatch && currentPatch.hunks.length > 0) {
-      currentPatch.hunks[currentPatch.hunks.length - 1].lines.push(line);
-    }
-  }
-
-  if (currentPatch) patches.push(currentPatch);
-  return patches;
+  return diff.parsePatch(patchContent);
 }
 
 function applyPatch(content, patch) {
-  const lines = content.split('\n');
-  for (const hunk of patch.hunks) {
-    let lineIndex = 0;
-    for (const line of hunk.lines) {
-      if (line.startsWith('-')) {
-        lines.splice(lineIndex, 1);
-      } else if (line.startsWith('+')) {
-        lines.splice(lineIndex, 0, line.slice(1));
-        lineIndex++;
-      } else {
-        lineIndex++;
-      }
-    }
+  const patchedContent = diff.applyPatch(content, patch);
+  if (patchedContent === false) {
+    throw new Error('Failed to apply patch');
   }
-  return lines.join('\n');
+  return patchedContent;
 }
 
 async function manualEdit(filePath, patchFile) {
@@ -647,194 +630,6 @@ function extractFrontMatter(content) {
   
   return { frontMatter: {}, content };
 }
-
-async function handlePatch(patch, appName, appPackage) {
-  const { path: patchPath, append, prepend, after, insert, skip } = patch;
-  
-  if (skip) return;
-  
-  const filePath = replaceAppNameAndPackage(patchPath, appName, appPackage);
-  
-  if (append) {
-    await toolbox.patching.append(filePath, replaceAppNameAndPackage(append, appName, appPackage));
-  }
-  if (prepend) {
-    await toolbox.patching.prepend(filePath, replaceAppNameAndPackage(prepend, appName, appPackage));
-  }
-  if (after && insert) {
-    await toolbox.patching.patch(filePath, { after, insert: replaceAppNameAndPackage(insert, appName, appPackage) });
-  }
-}
-
-async function applyFileChange(change, templatesDir, appName, appPackage, diffContent, targetVersion) {
-  const rootFiles = getRootFilesFromDiff(diffContent);
-  console.log('Root files identified from diff:', rootFiles);
-
-  let actualFilePath = replaceAppNameAndPackage(change.file, appName, appPackage);
-
-  // Special handling for files in the root directory
-  if (rootFiles.includes(actualFilePath)) {
-    actualFilePath = path.basename(actualFilePath);
-  } else {
-    // Remove the extra directory levels and the app name directory
-    const parts = actualFilePath.split('/');
-    const appNameLower = appName.toLowerCase();
-    while (parts.length > 0 && (parts[0] === appNameLower || parts[0] === 'RnDiffApp' || parts[0] === appName)) {
-      parts.shift();
-    }
-    actualFilePath = parts.join('/');
-  }
-
-  const filePath = path.join(process.cwd(), actualFilePath);
-  const templatePath = path.join(templatesDir, `${actualFilePath}.ejs`);
-
-  console.log('File path:', filePath);
-  console.log('Template path:', templatePath);
-
-  try {
-    let originalContent = '';
-    let isNewFile = false;
-    let operationType = 'MODIFIED';
-
-    try {
-      originalContent = await fs.readFile(filePath, 'utf8');
-    } catch (error) {
-      if (error.code === 'ENOENT') {
-        console.log(`File does not exist: ${filePath}. This will be a new file.`);
-        isNewFile = true;
-        operationType = 'ADDED';
-      } else {
-        throw error;
-      }
-    }
-
-    const templateContent = await fs.readFile(templatePath, 'utf8');
-    const renderedTemplate = ejs.render(templateContent, {
-      props: {
-        original: originalContent,
-        appName,
-        appPackage,
-        pascalCaseName: toPascalCase(appName),
-        camelCaseName: toCamelCase(appName),
-        skipIndexFile: false,
-        applyChanges: true // Set this to false if you want to preview without changes
-      }
-    });
-
-    const { data, content } = extractFrontMatter(renderedTemplate);
-
-    // Check if the file is binary
-    if (isBinaryFile(content)) {
-      operationType = 'BINARY';
-      console.log(`Binary file detected: ${actualFilePath}`);
-      // Handle binary file (e.g., download to the path)
-      await handleBinaryFile(filePath, content);
-    } else if (content.trim() === '') {
-      operationType = 'DELETED';
-      console.log(`File will be deleted: ${actualFilePath}`);
-    }
-
-    const updatedFile = path.join(templatesDir, `${operationType}_${path.basename(filePath)}`);
-    await fs.writeFile(updatedFile, content);
-
-    let targetFilePath = filePath;
-    let action;
-    do {
-      // Generate and show diff preview
-      let diffPreview;
-      if (isNewFile || operationType === 'ADDED') {
-        diffPreview = `New file: ${targetFilePath}\n\n${content}`;
-      } else if (operationType === 'DELETED') {
-        diffPreview = `File to be deleted: ${targetFilePath}`;
-      } else if (operationType === 'BINARY') {
-        diffPreview = `Binary file: ${targetFilePath}\nContent cannot be displayed.`;
-      } else {
-        diffPreview = await generateDiff(originalContent, content, targetFilePath);
-      }
-      // Use console.log directly without color formatting
-      console.log(`\nDiff preview for ${operationType} ${targetFilePath}:`);
-      console.log(diffPreview);
-
-      // Ask for action
-      ({ action } = await inquirer.prompt([
-        {
-          type: 'list',
-          name: 'action',
-          message: 'What would you like to do?',
-          choices: ['Apply changes', 'Edit changes', 'Change target file', 'Skip']
-        }
-      ]));
-
-      switch (action) {
-        case 'Apply changes':
-          if (operationType === 'DELETED') {
-            await fs.unlink(targetFilePath);
-            console.log(`Deleted ${targetFilePath}`);
-          } else {
-            await fs.mkdir(path.dirname(targetFilePath), { recursive: true });
-            await fs.copyFile(updatedFile, targetFilePath);
-            console.log(`${operationType} ${targetFilePath}`);
-          }
-          if (data.patches) {
-            await handlePatches(data.patches);
-          }
-          break;
-        case 'Edit changes':
-          if (operationType !== 'BINARY' && operationType !== 'DELETED') {
-            await editContent(updatedFile);
-          } else {
-            console.log(`Cannot edit ${operationType} file.`);
-          }
-          break;
-        case 'Change target file':
-          const { newFilePath } = await inquirer.prompt([
-            {
-              type: 'input',
-              name: 'newFilePath',
-              message: 'Enter the new target file path:',
-              default: targetFilePath
-            }
-          ]);
-          targetFilePath = newFilePath;
-          break;
-        case 'Skip':
-          console.log(`Skipped changes to ${targetFilePath}`);
-          break;
-      }
-    } while (action === 'Edit changes' || action === 'Change target file');
-
-  } catch (error) {
-    console.error(`Failed to update ${filePath}: ${error.message}`);
-    console.error('Error details:', error);
-  }
-}
-
-// Helper function to check if a file is binary
-function isBinaryFile(content) {
-  const nullByteIndex = content.indexOf('\0');
-  return nullByteIndex !== -1 && nullByteIndex < 1024;
-}
-
-// Helper function to handle binary files
-async function handleBinaryFile(filePath, content) {
-  // Implement logic to handle binary files (e.g., download to the path)
-  // For now, we'll just write the content as is
-  await fs.writeFile(filePath, content, 'binary');
-}
-
-function deepMerge(target, source) {
-  for (const key in source) {
-    if (source.hasOwnProperty(key)) {
-      if (source[key] instanceof Object && key in target) {
-        Object.assign(source[key], deepMerge(target[key], source[key]));
-      }
-    }
-  }
-  Object.assign(target || {}, source);
-  return target;
-}
-
-
 
 async function handlePatches(patches) {
   for (const patch of patches) {
@@ -1011,9 +806,8 @@ async function generateAllPatches(upgradePlan, diffContent, patchesDir, appName,
 }
 
 function generatePatchContent(filePath, changes) {
-  // const header = `--- a/${filePath}\n+++ b/${filePath}\n@@ -1,1 +1,1 @@\n`;
-  // return header + changes;
-  return changes;
+  const header = `--- a/${filePath}\n+++ b/${filePath}\n@@ -1,1 +1,1 @@\n`;
+  return header + changes;
 }
 
 async function applyPatchFile(change, patchesDir, appName, appPackage, inquirer) {
@@ -1070,100 +864,103 @@ async function applyPatchFile(change, patchesDir, appName, appPackage, inquirer)
   const tempPatchFile = path.join(patchesDir, `temp_${patchFileName}`);
   await fs.writeFile(tempPatchFile, updatedPatchContent);
 
-  // Determine the actual file path
-  const actualFilePath = path.join(process.cwd(), filePath);
-
-  // Apply the patch to the file
-  await applyPatchToFile(actualFilePath, tempPatchFile);
-}
-
-async function applyPatchToFile(filePath, patchFile) {
+  // Apply the patch using Git's apply command
   try {
-    // Ensure the directory exists
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-
-    // Check if the file exists, if not, create an empty file
-    let originalContent = '';
-    try {
-      originalContent = await fs.readFile(filePath, 'utf8');
-    } catch (error) {
-      if (error.code === 'ENOENT') {
-        await fs.writeFile(filePath, '');
-        console.log(`Created empty file: ${filePath}`);
-      } else {
-        throw error;
-      }
-    }
-
-    // Read and parse the patch content
-    const patchContent = await fs.readFile(patchFile, 'utf8');
-    const parsedPatch = parsePatch(patchContent);
-
-    if (parsedPatch.length === 0) {
-      console.log(`No valid patch content found in ${patchFile}. Skipping.`);
-      return;
-    }
-
-    // Apply the patch
-    const patchedContent = applyPatch(originalContent, parsedPatch[0]);
-
-    if (patchedContent === false) {
-      throw new Error('Failed to apply patch');
-    }
-
-    // Write the patched content back to the file
-    await fs.writeFile(filePath, patchedContent);
+    execSync(`git apply ${tempPatchFile}`, { stdio: 'inherit' });
     console.log(`Patch applied successfully to ${filePath}.`);
-    console.log('The following changes were made:');
-    console.log(patchContent);  // This will show the actual changes
-
   } catch (error) {
-    console.error(`Error applying patch to ${filePath}:`, error.message);
-    console.log('Attempting manual edit...');
-    await manualEdit(filePath, patchFile);
+    console.error(`Error applying patch to ${filePath} using git apply:`, error.message);
+    console.log('Attempting to use AI to apply the patch...');
+    await applyPatchUsingAI(filePath, patchFilePath);
   } finally {
     // Clean up the temporary patch file
-    await fs.unlink(patchFile);
+    await fs.unlink(tempPatchFile);
   }
+}
+
+async function applyPatchUsingAI(filePath, patchFilePath) {
+  const originalContent = await fs.readFile(filePath, 'utf8');
+  const patchContent = await fs.readFile(patchFilePath, 'utf8');
+
+  const prompt = `
+  Original file content:
+  ${originalContent}
+
+  Patch content:
+  ${patchContent}
+
+  Apply the patch to the original file content and provide ONLY the updated file content, without any additional text or explanations.
+  `;
+
+  const apiKeys = [
+    { key: process.env.ANTHROPIC_API_KEY, type: 'anthropic', model: 'claude-3-5-sonnet-20240620' },
+    { key: process.env.GROQ_API_KEY, type: 'groq', model: 'llama3-8b-8192' },
+    { key: process.env.OPENAI_API_KEY, url: 'https://api.openai.com/v1/completions', model: 'gpt-4o-2024-08-06' },
+    { key: process.env.DEEPSEEK_API_KEY, url: 'https://api.deepseek.com/v1/completions', model: 'deepseek/deepseek-coder' }
+  ];
+
+  for (const api of apiKeys) {
+    try {
+      let patchedContent;
+
+      if (api.type === 'anthropic') {
+        const anthropic = new Anthropic({ apiKey: api.key });
+        const response = await anthropic.messages.create({
+          model: api.model,
+          max_tokens: 2048,
+          messages: [{ role: "user", content: prompt }],
+        });
+        patchedContent = response.content[0].text;
+      } else if (api.type === 'groq') {
+        const groq = new Groq({ apiKey: api.key });
+        const response = await groq.chat.completions.create({
+          messages: [{ role: "user", content: prompt }],
+          model: api.model,
+        });
+        patchedContent = response.choices[0]?.message?.content;
+      } else {
+        const response = await axios.post(
+          api.url,
+          {
+            model: api.model,
+            prompt: prompt,
+            max_tokens: 2048,
+            temperature: 0.5,
+          },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${api.key}`,
+            },
+          }
+        );
+        patchedContent = response.data.choices[0].text.trim();
+      }
+
+      if (patchedContent) {
+        await fs.writeFile(filePath, patchedContent);
+        console.log(`Patch applied successfully to ${filePath} using AI (${api.model}).`);
+        return;
+      }
+    } catch (error) {
+      console.error(`Error applying patch to ${filePath} using ${api.model}:`, error.message);
+    }
+  }
+
+  console.log('All AI attempts failed. Attempting manual edit...');
+  await manualEdit(filePath, patchFilePath);
 }
 
 function parsePatch(patchContent) {
-  // Simple patch parser (you might want to use a more robust library for this)
-  const lines = patchContent.split('\n');
-  const patches = [];
-  let currentPatch = null;
-
-  for (const line of lines) {
-    if (line.startsWith('--- ') || line.startsWith('+++ ')) {
-      if (currentPatch) patches.push(currentPatch);
-      currentPatch = { hunks: [] };
-    } else if (line.startsWith('@@ ')) {
-      if (currentPatch) currentPatch.hunks.push({ lines: [] });
-    } else if (currentPatch && currentPatch.hunks.length > 0) {
-      currentPatch.hunks[currentPatch.hunks.length - 1].lines.push(line);
-    }
-  }
-
-  if (currentPatch) patches.push(currentPatch);
-  return patches;
+  return diff.parsePatch(patchContent);
 }
 
 function applyPatch(content, patch) {
-  const lines = content.split('\n');
-  for (const hunk of patch.hunks) {
-    let lineIndex = 0;
-    for (const line of hunk.lines) {
-      if (line.startsWith('-')) {
-        lines.splice(lineIndex, 1);
-      } else if (line.startsWith('+')) {
-        lines.splice(lineIndex, 0, line.slice(1));
-        lineIndex++;
-      } else {
-        lineIndex++;
-      }
-    }
+  const patchedContent = diff.applyPatch(content, patch);
+  if (patchedContent === false) {
+    throw new Error('Failed to apply patch');
   }
-  return lines.join('\n');
+  return patchedContent;
 }
 
 async function manualEdit(filePath, patchFile) {
@@ -1192,10 +989,11 @@ function getRootFilesFromDiff(diffContent) {
   const rootFiles = new Set();
   const lines = diffContent.split('\n');
   for (const line of lines) {
-    if (line.startsWith('--- a/')) {
-      const filePath = line.slice(6);
-      const rootFile = filePath.split('/')[0];
-      rootFiles.add(rootFile);
+    if (line.startsWith('diff --git')) {
+      const filePath = line.split(' b/')[1];
+      if (filePath && !filePath.includes('/')) {
+        rootFiles.add(filePath);
+      }
     }
   }
   return Array.from(rootFiles);
