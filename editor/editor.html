@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Valen Editor</title>
+    <link rel="stylesheet" href="../styles.css">
+    <link rel="stylesheet" href="editor.css">
+    <!-- Add this in the <head> section -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <h1 class="home-button" id="home-button">Valen</h1>
+        </div>
+        <div class="header-right">
+            <span class="theme-toggle header-icon">🌙</span>
+            <button class="header-button" id="view-chat-btn">View Chat</button>
+            <button class="header-button" id="notebook-guide-btn">Notebook guide</button>
+            <div class="profile-icon">U</div>
+        </div>
+    </div>
+    <div class="home-container">
+        <h2>Projects</h2>
+        <div class="notebooks-grid" id="notebooks-grid">
+            <!-- Notebooks will be dynamically added here -->
+        </div>
+    </div>
+    <div class="editor-container">
+        <div class="container">
+            <div class="sidebar">
+                <h2>Sources</h2>
+                <div class="source-item">
+                    <input type="checkbox" id="select-all">
+                    <label for="select-all">Select all sources</label>
+                </div>
+                <div id="sources-list">
+                    <!-- Sources will be dynamically added here -->
+                </div>
+            </div>
+            <div class="main-content" id="notes-area">
+                <!-- Notes will be dynamically added here -->
+            </div>
+        </div>
+        <div class="chat-area">
+            <div class="chat-messages" id="chat-messages">
+                <!-- Chat messages will be dynamically added here -->
+            </div>
+            <div class="chat-input-area">
+                <div class="chat-suggestions" id="chat-suggestions">
+                    <!-- Chat suggestions will be dynamically added here -->
+                </div>
+                <div class="chat-controls">
+                    <input type="text" id="chat-input" placeholder="Start typing...">
+                    <button id="send-button">→</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="text-editor">
+        <div class="text-editor-header">
+            <h2 class="text-editor-title" id="text-editor-title"></h2>
+            <div class="file-label" id="file-label">
+                <span id="file-name"></span>
+                <input type="text" id="file-name-input" style="display: none;">
+            </div>
+            <div class="view-selector">
+                <!-- View options will be dynamically added here -->
+            </div>
+            <span class="text-editor-close">&times;</span>
+        </div>
+        <div class="text-editor-toolbar" id="default-toolbar">
+            <button onclick="formatText('bold')">B</button>
+            <button onclick="formatText('italic')">I</button>
+            <button onclick="formatText('underline')">U</button>
+            <button onclick="formatHeading('h1')">H1</button>
+            <button onclick="formatHeading('h2')">H2</button>
+            <button onclick="formatHeading('h3')">H3</button>
+            <button onclick="formatList('unordered')">UL</button>
+            <button onclick="formatList('ordered')">OL</button>
+        </div>
+        <div class="text-editor-toolbar code-toolbar" id="code-toolbar" style="display: none;">
+            <button class="toolbar-btn">File</button>
+            <button class="toolbar-btn">Edit</button>
+            <button class="toolbar-btn">Selection</button>
+            <button class="toolbar-btn">View</button>
+            <button class="toolbar-btn">Go</button>
+            <button class="toolbar-btn">Run</button>
+            <button class="toolbar-btn">Terminal</button>
+            <button class="toolbar-btn">Help</button>
+        </div>
+        <div class="text-editor-content" id="text-editor-content">
+            <div id="default-view" class="view-content active">
+                <!-- Default content (blocks) will be added here -->
+            </div>
+            <div id="table-view" class="view-content table-view">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Content</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Table rows will be added here -->
+                    </tbody>
+                </table>
+            </div>
+            <div id="board-view" class="view-content board-view">
+                <!-- Board columns will be added here -->
+            </div>
+            <div id="code-view" class="view-content code-view">
+                <textarea id="code-editor"></textarea>
+            </div>
+            <!-- Add more view containers as needed -->
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.62.0/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.62.0/mode/javascript/javascript.min.js"></script>
+    <script src="../common.js"></script>
+    <script src="../notebook.js"></script>
+    <script src="editor.js"></script>
+    <script src="text-editor.js"></script>
+    <script>
+        // Chat suggestions
+        const chatSuggestions = [
+            "What are the potential downsides of the mushroom boom that the memo does not address?",
+            "How can the town ensure that the economic growth from the mushroom boom is sustainable?"
+        ];
+
+        function renderChatSuggestions() {
+            const suggestionsArea = document.getElementById('chat-suggestions');
+            suggestionsArea.innerHTML = ''; // Clear existing suggestions
+            chatSuggestions.forEach(suggestion => {
+                const div = document.createElement('div');
+                div.className = 'chat-suggestion';
+                div.textContent = suggestion;
+                div.addEventListener('click', () => {
+                    document.getElementById('chat-input').value = suggestion;
+                });
+                suggestionsArea.appendChild(div);
+            });
+        }
+
+        function addChatMessage(message, isUser = false) {
+            const chatMessages = document.getElementById('chat-messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${isUser ? 'user-message' : 'ai-message'}`;
+            messageDiv.textContent = message;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Chat functionality
+        const chatInput = document.getElementById('chat-input');
+        const sendButton = document.getElementById('send-button');
+
+        sendButton.addEventListener('click', () => {
+            const message = chatInput.value.trim();
+            if (message) {
+                addChatMessage(message, true);
+                chatInput.value = '';
+                // Here you would typically send the message to a backend or process it
+                // For now, let's just add a mock response
+                setTimeout(() => {
+                    addChatMessage("Thank you for your message. I'm an AI assistant here to help with your questions about NotebookLM.");
+                }, 1000);
+            }
+        });
+
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendButton.click();
+            }
+        });
+
+        // Initialize chat suggestions
+        renderChatSuggestions();
+
+        // Add this to ensure notebooks are rendered when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            if (typeof window.renderNotebooks === 'function') {
+                window.renderNotebooks();
+            } else {
+                console.error('renderNotebooks function not found!');
+            }
+        });
+
+        // Initialize Mermaid
+        <script>
+            mermaid.initialize({ startOnLoad: true });
+        </script>
+    </script>
+</body>
+</html>

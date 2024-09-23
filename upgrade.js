@@ -24,12 +24,6 @@ async function initializeInquirer() {
   return inquirer;
 }
 
-// Call this function at the beginning of your main execution
-async function main() {
-  inquirer = await initializeInquirer();
-  // Rest of your code...
-}
-
 async function ensurePackagesInstalled() {
   const packages = ['axios', 'anthropic', 'openai', 'gluegun', 'ejs', 'ora', 'cli-progress', 'js-yaml', 'inquirer', 'chalk', 'diff', 'open', 'os'];
 
@@ -501,8 +495,9 @@ async function applyPatchToFile(filePath, patchFile) {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
 
     // Check if the file exists, if not, create an empty file
+    let originalContent = '';
     try {
-      await fs.access(filePath);
+      originalContent = await fs.readFile(filePath, 'utf8');
     } catch (error) {
       if (error.code === 'ENOENT') {
         await fs.writeFile(filePath, '');
@@ -512,30 +507,96 @@ async function applyPatchToFile(filePath, patchFile) {
       }
     }
 
+    // Read and parse the patch content
+    const patchContent = await fs.readFile(patchFile, 'utf8');
+    const parsedPatch = parsePatch(patchContent);
+
+    if (parsedPatch.length === 0) {
+      console.log(`No valid patch content found in ${patchFile}. Skipping.`);
+      return;
+    }
+
     // Apply the patch
-    execSync(`patch -p1 < "${patchFile}"`, { stdio: 'inherit', cwd: process.cwd() });
+    const patchedContent = applyPatch(originalContent, parsedPatch[0]);
+
+    if (patchedContent === false) {
+      throw new Error('Failed to apply patch');
+    }
+
+    // Write the patched content back to the file
+    await fs.writeFile(filePath, patchedContent);
     console.log(`Patch applied successfully to ${filePath}.`);
+    console.log('The following changes were made:');
+    console.log(patchContent);  // This will show the actual changes
+
   } catch (error) {
     console.error(`Error applying patch to ${filePath}:`, error.message);
-    console.log('Attempting to apply patch with --reject-file option...');
-    try {
-      execSync(`patch -p1 --reject-file=- < "${patchFile}"`, { stdio: 'inherit', cwd: process.cwd() });
-      console.log(`Patch applied with reject file option to ${filePath}. Please check for .rej files.`);
-    } catch (rejectError) {
-      console.error(`Error applying patch with reject file option to ${filePath}:`, rejectError.message);
-      console.log('Attempting to create file with patch content...');
-      try {
-        const patchContent = await fs.readFile(patchFile, 'utf8');
-        const fileContent = patchContent.split('\n').filter(line => line.startsWith('+')).map(line => line.slice(1)).join('\n');
-        await fs.writeFile(filePath, fileContent);
-        console.log(`Created ${filePath} with patch content.`);
-      } catch (createError) {
-        console.error(`Error creating file with patch content:`, createError.message);
-      }
-    }
+    console.log('Attempting manual edit...');
+    await manualEdit(filePath, patchFile);
   } finally {
     // Clean up the temporary patch file
     await fs.unlink(patchFile);
+  }
+}
+
+function parsePatch(patchContent) {
+  // Simple patch parser (you might want to use a more robust library for this)
+  const lines = patchContent.split('\n');
+  const patches = [];
+  let currentPatch = null;
+
+  for (const line of lines) {
+    if (line.startsWith('--- ') || line.startsWith('+++ ')) {
+      if (currentPatch) patches.push(currentPatch);
+      currentPatch = { hunks: [] };
+    } else if (line.startsWith('@@ ')) {
+      if (currentPatch) currentPatch.hunks.push({ lines: [] });
+    } else if (currentPatch && currentPatch.hunks.length > 0) {
+      currentPatch.hunks[currentPatch.hunks.length - 1].lines.push(line);
+    }
+  }
+
+  if (currentPatch) patches.push(currentPatch);
+  return patches;
+}
+
+function applyPatch(content, patch) {
+  const lines = content.split('\n');
+  for (const hunk of patch.hunks) {
+    let lineIndex = 0;
+    for (const line of hunk.lines) {
+      if (line.startsWith('-')) {
+        lines.splice(lineIndex, 1);
+      } else if (line.startsWith('+')) {
+        lines.splice(lineIndex, 0, line.slice(1));
+        lineIndex++;
+      } else {
+        lineIndex++;
+      }
+    }
+  }
+  return lines.join('\n');
+}
+
+async function manualEdit(filePath, patchFile) {
+  const patchContent = await fs.readFile(patchFile, 'utf8');
+  console.log('Patch content:');
+  console.log(patchContent);
+  
+  const { edit } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'edit',
+      message: `Do you want to manually edit ${filePath}?`,
+      default: true
+    }
+  ]);
+
+  if (edit) {
+    await editContent(filePath);
+    console.log(`Manual edit completed for ${filePath}`);
+  } else {
+    console.log(`Skipped changes to ${filePath}`);
   }
 }
 
@@ -950,8 +1011,9 @@ async function generateAllPatches(upgradePlan, diffContent, patchesDir, appName,
 }
 
 function generatePatchContent(filePath, changes) {
-  const header = `--- a/${filePath}\n+++ b/${filePath}\n@@ -1,1 +1,1 @@\n`;
-  return header + changes;
+  // const header = `--- a/${filePath}\n+++ b/${filePath}\n@@ -1,1 +1,1 @@\n`;
+  // return header + changes;
+  return changes;
 }
 
 async function applyPatchFile(change, patchesDir, appName, appPackage, inquirer) {
@@ -1021,8 +1083,9 @@ async function applyPatchToFile(filePath, patchFile) {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
 
     // Check if the file exists, if not, create an empty file
+    let originalContent = '';
     try {
-      await fs.access(filePath);
+      originalContent = await fs.readFile(filePath, 'utf8');
     } catch (error) {
       if (error.code === 'ENOENT') {
         await fs.writeFile(filePath, '');
@@ -1032,30 +1095,96 @@ async function applyPatchToFile(filePath, patchFile) {
       }
     }
 
+    // Read and parse the patch content
+    const patchContent = await fs.readFile(patchFile, 'utf8');
+    const parsedPatch = parsePatch(patchContent);
+
+    if (parsedPatch.length === 0) {
+      console.log(`No valid patch content found in ${patchFile}. Skipping.`);
+      return;
+    }
+
     // Apply the patch
-    execSync(`patch -p1 < "${patchFile}"`, { stdio: 'inherit', cwd: process.cwd() });
+    const patchedContent = applyPatch(originalContent, parsedPatch[0]);
+
+    if (patchedContent === false) {
+      throw new Error('Failed to apply patch');
+    }
+
+    // Write the patched content back to the file
+    await fs.writeFile(filePath, patchedContent);
     console.log(`Patch applied successfully to ${filePath}.`);
+    console.log('The following changes were made:');
+    console.log(patchContent);  // This will show the actual changes
+
   } catch (error) {
     console.error(`Error applying patch to ${filePath}:`, error.message);
-    console.log('Attempting to apply patch with --reject-file option...');
-    try {
-      execSync(`patch -p1 --reject-file=- < "${patchFile}"`, { stdio: 'inherit', cwd: process.cwd() });
-      console.log(`Patch applied with reject file option to ${filePath}. Please check for .rej files.`);
-    } catch (rejectError) {
-      console.error(`Error applying patch with reject file option to ${filePath}:`, rejectError.message);
-      console.log('Attempting to create file with patch content...');
-      try {
-        const patchContent = await fs.readFile(patchFile, 'utf8');
-        const fileContent = patchContent.split('\n').filter(line => line.startsWith('+')).map(line => line.slice(1)).join('\n');
-        await fs.writeFile(filePath, fileContent);
-        console.log(`Created ${filePath} with patch content.`);
-      } catch (createError) {
-        console.error(`Error creating file with patch content:`, createError.message);
-      }
-    }
+    console.log('Attempting manual edit...');
+    await manualEdit(filePath, patchFile);
   } finally {
     // Clean up the temporary patch file
     await fs.unlink(patchFile);
+  }
+}
+
+function parsePatch(patchContent) {
+  // Simple patch parser (you might want to use a more robust library for this)
+  const lines = patchContent.split('\n');
+  const patches = [];
+  let currentPatch = null;
+
+  for (const line of lines) {
+    if (line.startsWith('--- ') || line.startsWith('+++ ')) {
+      if (currentPatch) patches.push(currentPatch);
+      currentPatch = { hunks: [] };
+    } else if (line.startsWith('@@ ')) {
+      if (currentPatch) currentPatch.hunks.push({ lines: [] });
+    } else if (currentPatch && currentPatch.hunks.length > 0) {
+      currentPatch.hunks[currentPatch.hunks.length - 1].lines.push(line);
+    }
+  }
+
+  if (currentPatch) patches.push(currentPatch);
+  return patches;
+}
+
+function applyPatch(content, patch) {
+  const lines = content.split('\n');
+  for (const hunk of patch.hunks) {
+    let lineIndex = 0;
+    for (const line of hunk.lines) {
+      if (line.startsWith('-')) {
+        lines.splice(lineIndex, 1);
+      } else if (line.startsWith('+')) {
+        lines.splice(lineIndex, 0, line.slice(1));
+        lineIndex++;
+      } else {
+        lineIndex++;
+      }
+    }
+  }
+  return lines.join('\n');
+}
+
+async function manualEdit(filePath, patchFile) {
+  const patchContent = await fs.readFile(patchFile, 'utf8');
+  console.log('Patch content:');
+  console.log(patchContent);
+  
+  const { edit } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'edit',
+      message: `Do you want to manually edit ${filePath}?`,
+      default: true
+    }
+  ]);
+
+  if (edit) {
+    await editContent(filePath);
+    console.log(`Manual edit completed for ${filePath}`);
+  } else {
+    console.log(`Skipped changes to ${filePath}`);
   }
 }
 
@@ -1283,18 +1412,6 @@ async function handleUpgradeOption(type, appName, appPackage, currentVersion, ta
     console.log('Invalid upgrade type. Use "web" or "auto".');
   }
 }
-
-// Update the main function to initialize inquirer
-async function main() {
-  inquirer = await initializeInquirer();
-  // Rest of your code...
-}
-
-// Make sure to call main() at the start of your script
-main().catch(error => {
-  console.error('Error in main execution:', error);
-  process.exit(1);
-});
 
 module.exports = {
   handleReactNativeUpgrade,
