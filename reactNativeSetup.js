@@ -1,7 +1,6 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import inquirer from 'inquirer';
-import ora from 'ora';
 import cliProgress from 'cli-progress';
 import chalk from 'chalk';
 import fs from 'fs';
