@@ -1,4 +1,4 @@
-declare module '@Joel/valen' {
+declare module '@valen/valen' {
   export function mainMenu(): Promise<void>;
   export function cleanupMac(): Promise<void>;
   export function setupIOS(): Promise<void>;
@@ -9,4 +9,12 @@ declare module '@Joel/valen' {
   export function renameProject(newName?: string): Promise<void>;
   export function monitorLogs(logType?: string): Promise<void>;
   export function handleAutomatedBrowsing(query: string): Promise<void>;
+  export function handleReactNativeUpgrade(): Promise<void>;
+  export function handleUpgradeOption(
+    upgradeType: string,
+    appName?: string,
+    appPackage?: string,
+    currentVersion?: string,
+    targetVersion?: string
+  ): Promise<void>;
 }
