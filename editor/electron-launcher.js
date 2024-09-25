@@ -11,7 +11,7 @@ function createWindow() {
     },
   });
 
-  win.loadFile(path.join(__dirname, 'editor.html'));
+  win.loadFile(path.join(__dirname, 'editor', 'editor.html'));
 }
 
 app.whenReady().then(() => {

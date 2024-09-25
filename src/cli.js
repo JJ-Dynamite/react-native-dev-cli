@@ -13,7 +13,7 @@ async function run(argv) {
 
   // If no command was run, show the main menu
   if (!toolbox.command) {
-    const { mainMenu } = require('../index.js');
+    const { mainMenu } = require('../bin/valen.js'); // Updated path
     await mainMenu();
   }
 

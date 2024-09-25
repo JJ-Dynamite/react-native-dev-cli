@@ -246,10 +246,9 @@ async function customInstall() {
   }
 }
 
-export async function setupReactNative() {
-  // Implement React Native setup logic here
+export function setupReactNative() {
   console.log('Setting up React Native...');
-  // Add your React Native setup steps
+  // Implement React Native setup logic here
 }
 
 async function performSetup(option, progressBar) {

@@ -1,12 +1,11 @@
-const { setupReactNative } = require('../../reactNativeSetup.js');
-const { cleanupMac } = require('../../macCleanup.js');
-const { setupIOS } = require('../../ios.js');
-const { setupAndroid } = require('../../android.js');
+const { setupReactNative } = require('../../utils/reactNativeSetup.js'); // Updated path
+const { cleanupMac } = require('../../utils/macCleanup.js'); // Updated path
+const { setupIOS } = require('../../utils/ios.js'); // Updated path
+const { setupAndroid } = require('../../utils/android.js'); // Updated path
 
 const setupCommand = async () => {
-  // Implement your setup logic here
   console.log('Running setup command...');
   // Add your setup steps
 };
 
-export { setupCommand };
+module.exports = { setupCommand }; // Changed to CommonJS export
