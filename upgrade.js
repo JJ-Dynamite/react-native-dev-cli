@@ -19,6 +19,7 @@ const Groq = require('groq-sdk');
 const glob = require('glob');
 const { applyPatchUsingAI } = require('./aiHelpers');
 const { generateDiff } = require('./diffUtils');
+const { ensurePackagesInstalled } = require('./global-utils');
 
 let inquirer;
 
@@ -27,35 +28,6 @@ async function initializeInquirer() {
     inquirer = (await import('inquirer')).default;
   }
   return inquirer;
-}
-
-async function ensurePackagesInstalled() {
-  const packages = ['axios', 'anthropic', 'openai', 'gluegun', 'ejs', 'ora', 'cli-progress', 'js-yaml', 'inquirer', 'chalk', 'diff', 'open', 'os'];
-
-  for (const pkg of packages) {
-    try {
-      // Check if the package is globally installed
-      await execSync(`bun pm ls -g ${pkg}`, { stdio: 'ignore' });
-      console.log(`${pkg} is already installed globally.`);
-    } catch (error) {
-      console.log(`Installing ${pkg} globally...`);
-      try {
-        // Use npm for global installation as Bun doesn't support it directly
-        await execSync(`npm install -g ${pkg}`, { stdio: 'inherit' });
-        console.log(`${pkg} installed globally successfully.`);
-      } catch (installError) {
-        console.error(`Failed to install ${pkg} globally:`, installError.message);
-        console.log(`Attempting to install ${pkg} locally...`);
-        try {
-          await execSync(`bun add ${pkg}`, { stdio: 'inherit' });
-          console.log(`${pkg} installed locally successfully.`);
-        } catch (localInstallError) {
-          console.error(`Failed to install ${pkg} locally:`, localInstallError.message);
-          process.exit(1);
-        }
-      }
-    }
-  }
 }
 
 async function promptUpgradeInfo() {
@@ -328,7 +300,7 @@ async function applyUpgradeChanges(upgradePlan, diffContent, appName, appPackage
           
           if (confirm) {
             try {
-              await applyPatchFile(change, patchesDir, appName, appPackage, inquirer);
+              await applyPatchFile(change, patchesDir, appName, appPackage, inquirer, targetVersion);
             } catch (error) {
               console.error(`Error applying change to ${replaceAppNameAndPackage(change.file, appName, appPackage)}:`, error.message);
               
@@ -395,6 +367,9 @@ async function generateAllPatches(upgradePlan, diffContent, patchesDir, appName,
           filePath = filePath.slice(appName.length + 1);
         }
         
+        // Remove duplicate 'app' in the path
+        filePath = filePath.replace(/\/app\/app\//g, '/app/');
+        
         const patchContent = generatePatchContent(filePath, change.content);
         const patchFileName = `${filePath.replace(/\//g, '_')}.patch`;
         const patchFilePath = path.join(patchesDir, patchFileName);
@@ -407,8 +382,8 @@ async function generateAllPatches(upgradePlan, diffContent, patchesDir, appName,
 }
 
 function generatePatchContent(filePath, changes) {
-  const header = `--- a/${filePath}\n+++ b/${filePath}\n@@ -1,1 +1,1 @@\n`;
-  return header + changes;
+  // Remove the unnecessary header
+  return changes;
 }
 
 async function isReactNativeProject() {
@@ -515,13 +490,11 @@ async function handleUpgradeOption(type, appName, appPackage, currentVersion, ta
 
 function replaceAppNameAndPackage(content, appName, appPackage) {
   return content
+    // Replace the template app name
     .replace(/RnDiffApp/g, appName)
-    .replace(/rndiffapp/g, appPackage.toLowerCase())
+    // Replace the template package name
     .replace(/com\.rndiffapp/g, appPackage)
-    .replace(/com\/rndiffapp/g, appPackage.replace(/\./g, '/'))
-    .replace(new RegExp(`${appName}/android`, 'g'), `${appName.toLowerCase()}/android`)
-    .replace(new RegExp(`${appName}/ios`, 'g'), `${appName.toLowerCase()}/ios`)
-    .replace(new RegExp(`${appName}/app`, 'g'), `${appName.toLowerCase()}/app`);
+    .replace(/com\/rndiffapp/g, appPackage.replace(/\./g, '/'));
 }
 
 async function fileExists(filePath) {
@@ -533,7 +506,7 @@ async function fileExists(filePath) {
   }
 }
 
-async function applyPatchFile(change, patchesDir, appName, appPackage, inquirer) {
+async function applyPatchFile(change, patchesDir, appName, appPackage, inquirer, targetVersion) {
   let filePath = replaceAppNameAndPackage(change.file, appName, appPackage);
   
   // Remove the app name from the beginning of the file path for root files
@@ -541,6 +514,39 @@ async function applyPatchFile(change, patchesDir, appName, appPackage, inquirer)
     filePath = filePath.slice(appName.length + 1);
   }
   
+  // Remove duplicate 'app' in the path
+  filePath = filePath.replace(/\/app\/app\//g, '/app/');
+  
+  // Special case for gradle-wrapper.jar
+  if (filePath.endsWith('gradle/wrapper/gradle-wrapper.jar')) {
+    const { confirmDownload } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'confirmDownload',
+        message: `Do you want to download the new gradle-wrapper.jar for version ${targetVersion}?`,
+        default: true
+      }
+    ]);
+
+    if (confirmDownload) {
+      const url = `https://raw.githubusercontent.com/react-native-community/rn-diff-purge/release/${targetVersion}/RnDiffApp/android/gradle/wrapper/gradle-wrapper.jar`;
+      console.log(`Downloading gradle-wrapper.jar from: ${url}`);
+      try {
+        const response = await axios.get(url, { responseType: 'arraybuffer' });
+        await fs.writeFile(filePath, response.data);
+        console.log(`Successfully downloaded and saved gradle-wrapper.jar to ${filePath}`);
+        return;
+      } catch (error) {
+        console.error(`Error downloading gradle-wrapper.jar: ${error.message}`);
+        console.log('Skipping this change. Please download the file manually.');
+        return;
+      }
+    } else {
+      console.log('Skipping download of gradle-wrapper.jar');
+      return;
+    }
+  }
+
   const patchFileName = `${filePath.replace(/\//g, '_')}.patch`;
   const patchFilePath = path.join(patchesDir, patchFileName);
 
@@ -551,44 +557,57 @@ async function applyPatchFile(change, patchesDir, appName, appPackage, inquirer)
   if (!await fileExists(filePath)) {
     console.log(`File ${filePath} does not exist.`);
     
-    const { action } = await inquirer.prompt([
-      {
-        type: 'list',
-        name: 'action',
-        message: `${filePath} doesn't exist. What would you like to do?`,
-        choices: [
-          'Search for file',
-          'Specify correct path',
-          'Create new file',
-          'Skip this change'
-        ]
-      }
-    ]);
+    let action;
+    do {
+      ({ action } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'action',
+          message: `${filePath} doesn't exist. What would you like to do?`,
+          choices: [
+            'Search for file',
+            'Specify correct path',
+            'Create new file',
+            'Skip this change'
+          ]
+        }
+      ]));
 
-    if (action === 'Search for file') {
-      filePath = await searchForFile(filePath, inquirer);
-      if (!filePath) {
-        console.log('File not found. Skipping this change.');
+      if (action === 'Search for file') {
+        const searchResult = await searchForFile(filePath, inquirer);
+        if (searchResult === 'GO_BACK') {
+          continue;  // Go back to the action selection
+        } else if (searchResult && searchResult.action === 'CREATE_NEW') {
+          action = 'Create new file';
+          filePath = searchResult.path;
+        } else if (searchResult) {
+          filePath = searchResult;
+          break;
+        } else {
+          console.log('File not found. Please choose another action.');
+          continue;
+        }
+      }
+
+      if (action === 'Specify correct path') {
+        const { correctPath } = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'correctPath',
+            message: 'Enter the correct file path (relative to project root):',
+            default: filePath
+          }
+        ]);
+        filePath = correctPath;
+      } else if (action === 'Create new file') {
+        console.log(`Creating new file: ${filePath}`);
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, '');
+      } else if (action === 'Skip this change') {
+        console.log('Skipping this change.');
         return;
       }
-    } else if (action === 'Specify correct path') {
-      const { correctPath } = await inquirer.prompt([
-        {
-          type: 'input',
-          name: 'correctPath',
-          message: 'Enter the correct file path (relative to project root):',
-          default: filePath
-        }
-      ]);
-      filePath = correctPath;
-    } else if (action === 'Create new file') {
-      console.log(`Creating new file: ${filePath}`);
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.writeFile(filePath, '');
-    } else {
-      console.log('Skipping this change.');
-      return;
-    }
+    } while (action === 'Search for file');
   }
 
   // Read the patch content
@@ -665,10 +684,92 @@ async function applyPatchFile(change, patchesDir, appName, appPackage, inquirer)
   }
 }
 
+async function searchForFile(targetFile, inquirer) {
+  const searchDir = process.cwd();
+  const files = await walkDir(searchDir);
+
+  const similarFiles = files.filter(file => 
+    file.toLowerCase().includes(path.basename(targetFile).toLowerCase())
+  );
+
+  if (similarFiles.length === 0) {
+    console.log('No similar files found.');
+    return null;
+  }
+
+  const { selectedOption } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'selectedOption',
+      message: 'Select the correct file or choose an action:',
+      choices: [
+        ...similarFiles,
+        new inquirer.Separator(),
+        'Go back',
+        'Create new file',
+        'None of these'
+      ]
+    }
+  ]);
+
+  switch (selectedOption) {
+    case 'Go back':
+      return 'GO_BACK';
+    case 'Create new file':
+      const { newFilePath } = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'newFilePath',
+          message: 'Enter the path for the new file:',
+          default: targetFile,
+          validate: async (input) => {
+            if (!input) return 'File path cannot be empty';
+            if (await fileExists(input)) return 'File already exists. Please choose a different path.';
+            return true;
+          }
+        }
+      ]);
+      const { confirmPath } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'confirmPath',
+          message: `Is this path correct: ${newFilePath}?`,
+          default: true
+        }
+      ]);
+      if (confirmPath) {
+        return { action: 'CREATE_NEW', path: newFilePath };
+      } else {
+        console.log('Returning to file selection...');
+        return 'GO_BACK';
+      }
+    case 'None of these':
+      return null;
+    default:
+      // The file was found and selected
+      return selectedOption;
+  }
+}
+
+async function walkDir(dir) {
+  let files = [];
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name !== 'node_modules' && entry.name !== '.git') {
+        files = files.concat(await walkDir(fullPath));
+      }
+    } else {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
 module.exports = {
   handleReactNativeUpgrade,
   handleUpgradeOption,
-  ensurePackagesInstalled,
   promptUpgradeInfo,
   openUpgradeHelperInBrowser,
   autoUpgradeWithNewBranch,
@@ -680,7 +781,8 @@ module.exports = {
   replaceAppNameAndPackage,
   applyPatchFile,
   fileExists,
-  generateDiff,
+  searchForFile,
+  walkDir,
 };
 
 
