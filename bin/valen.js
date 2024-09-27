@@ -14,7 +14,7 @@ import { setupSentient } from '../utils/sentientSetup.js'; // Updated path
 import open from 'open';
 import { handleReactNativeUpgrade, handleUpgradeOption } from '../utils/upgrade.js'; // Updated path
 import { handleAutomatedBrowsing } from '../utils/browser.js'; // Updated path
-import { handleGitOptions } from '../utils/git.js'; // Add this import
+import { handleGitOptions } from '../utils/git.js'; // Update this line
 import { handleAiderOptions } from '../utils/aider.js'; // Add this import
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';

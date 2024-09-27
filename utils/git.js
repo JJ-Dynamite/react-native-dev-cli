@@ -1,4 +1,5 @@
+import { handleGitOptions as handleGitOptionsImpl } from '../src/commands/git.js';
+
 export async function handleGitOptions() {
-  console.log('Git options handling not implemented yet');
-  // Implement Git options handling logic here
+  await handleGitOptionsImpl();
 }
