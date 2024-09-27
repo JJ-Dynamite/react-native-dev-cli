@@ -3,8 +3,9 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { spawn } from 'child_process';
 
-export async function handleGitOptions() {
+export async function handleGitOptions(arg) {
   console.log('Managing Git');
   
   // Check and update Git Flow configurations
@@ -23,6 +24,27 @@ export async function handleGitOptions() {
     }
   }
 
+  if (arg) {
+    switch (arg.toLowerCase()) {
+      case 'lc':
+      case 'lazygit':
+        runLazyGit();
+        break;
+      case 'f':
+      case 'flow':
+        await handleGitFlowOptions();
+        return;
+      case 'c':
+      case 'commit':
+        await handleCzgCommit();
+        return;
+      default:
+        console.log('Invalid argument. Use "lc" or "lazygit" for LazyGit, "f" or "flow" for Git Flow, "c" or "commit" for AI-assisted commit.');
+        return;
+    }
+  }
+
+  // If no argument is provided or after handling LazyGit, show the menu
   const choices = [
     { name: 'LazyGit', value: 'lazygit' },
     { name: 'Git Flow Options', value: 'gitflow' },
@@ -54,11 +76,9 @@ function runLazyGit() {
 }
 
 async function handleGitFlowOptions() {
-  try {
-    // Check if Git Flow is initialized
-    execSync('git flow config', { stdio: 'ignore' });
-  } catch (error) {
-    console.log('Git Flow is not initialized in this repository.');
+  const isGitFlowInitialized = await checkGitFlowInitialization();
+
+  if (!isGitFlowInitialized) {
     const { shouldInit } = await inquirer.prompt([
       {
         type: 'confirm',
@@ -129,6 +149,30 @@ async function handleGitFlowOptions() {
     case 'back':
       await handleGitOptions();
       break;
+  }
+}
+
+async function checkGitFlowInitialization() {
+  try {
+    // Check if .git directory exists
+    if (!fs.existsSync('.git')) {
+      console.log('This is not a Git repository.');
+      return false;
+    }
+
+    // Check if Git Flow configuration exists
+    const gitFlowConfig = execSync('git config --get gitflow.branch.master', { stdio: 'pipe' }).toString().trim();
+    if (gitFlowConfig) {
+      console.log('Git Flow is already initialized in this repository.');
+      return true;
+    }
+
+    // If we reach here, Git is initialized but Git Flow is not
+    console.log('Git is initialized, but Git Flow is not.');
+    return false;
+  } catch (error) {
+    console.error('Error checking Git Flow initialization:', error.message);
+    return false;
   }
 }
 
@@ -355,26 +399,11 @@ async function initializeGitFlow() {
 }
 
 async function listBranches() {
-  try {
-    // Check if the current repository is Git Flow enabled
-    execSync('git flow config', { stdio: 'ignore' });
-  } catch (error) {
-    console.log('This repository is not Git Flow enabled.');
-    const { shouldInit } = await inquirer.prompt([
-      {
-        type: 'confirm',
-        name: 'shouldInit',
-        message: 'Would you like to initialize Git Flow in this repository?',
-        default: true,
-      },
-    ]);
-
-    if (shouldInit) {
-      await initializeGitFlow();
-    } else {
-      console.log('Aborting branch listing.');
-      return;
-    }
+  const isGitFlowInitialized = await checkGitFlowInitialization();
+  
+  if (!isGitFlowInitialized) {
+    console.log('Git Flow is not initialized. Please initialize it first.');
+    return;
   }
 
   try {
@@ -385,11 +414,7 @@ async function listBranches() {
     console.log('\nHotfix branches:');
     execSync('git flow hotfix list', { stdio: 'inherit' });
   } catch (error) {
-    if (error.message.includes('Not a gitflow-enabled repo yet')) {
-      console.log('Git Flow is not properly initialized. Please run the "Initialize Git Flow" option first.');
-    } else {
-      console.error('Error listing branches:', error.message);
-    }
+    console.error('Error listing branches:', error.message);
   }
 }
 
@@ -416,4 +441,120 @@ async function pullUpdates() {
   ]);
 
   execSync(`git checkout ${branchType}/${branchName} && git pull origin ${branchType}/${branchName}`, { stdio: 'inherit' });
+}
+
+async function handleCzgCommit() {
+  try {
+    // Check if there are staged changes
+    const stagedChanges = execSync('git diff --cached --name-only').toString().trim();
+    if (!stagedChanges) {
+      console.log('No changes staged for commit. Please stage your changes first.');
+      return;
+    }
+
+    const { useAI } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'useAI',
+        message: 'Do you want to use AI for commit message generation?',
+        default: true,
+      },
+    ]);
+
+    let czgCommand = ['czg'];
+
+    if (useAI) {
+      czgCommand.push('ai');
+
+      const { aiOptions } = await inquirer.prompt([
+        {
+          type: 'checkbox',
+          name: 'aiOptions',
+          message: 'Select AI options:',
+          choices: [
+            { name: 'Set number of AI-generated subjects', value: 'aiNum' },
+            { name: 'Set API key', value: 'apiKey' },
+            { name: 'Set API proxy', value: 'apiProxy' },
+            { name: 'Set API endpoint', value: 'apiEndpoint' },
+          ],
+        },
+      ]);
+
+      for (const option of aiOptions) {
+        switch (option) {
+          case 'aiNum':
+            const { numSubjects } = await inquirer.prompt([
+              {
+                type: 'input',
+                name: 'numSubjects',
+                message: 'Enter the number of AI-generated subjects:',
+                default: '3',
+              },
+            ]);
+            czgCommand.push(`-N=${numSubjects}`);
+            break;
+          case 'apiKey':
+            const { apiKey } = await inquirer.prompt([
+              {
+                type: 'password',
+                name: 'apiKey',
+                message: 'Enter your OpenAI API key:',
+              },
+            ]);
+            czgCommand.push(`--api-key=${apiKey}`);
+            break;
+          case 'apiProxy':
+            const { apiProxy } = await inquirer.prompt([
+              {
+                type: 'input',
+                name: 'apiProxy',
+                message: 'Enter the API proxy URL:',
+              },
+            ]);
+            czgCommand.push(`--api-proxy=${apiProxy}`);
+            break;
+          case 'apiEndpoint':
+            const { apiEndpoint } = await inquirer.prompt([
+              {
+                type: 'input',
+                name: 'apiEndpoint',
+                message: 'Enter the API endpoint:',
+                default: 'https://api.openai.com/v1',
+              },
+            ]);
+            czgCommand.push(`--api-endpoint=${apiEndpoint}`);
+            break;
+        }
+      }
+    }
+
+    const { additionalOptions } = await inquirer.prompt([
+      {
+        type: 'checkbox',
+        name: 'additionalOptions',
+        message: 'Select additional options:',
+        choices: [
+          { name: 'Use emoji', value: 'emoji' },
+          { name: 'Use checkbox for scope selection', value: 'checkbox' },
+          { name: 'Use GPG sign', value: 'gpg' },
+          { name: 'Append ! after type/scope', value: 'break' },
+        ],
+      },
+    ]);
+
+    czgCommand.push(...additionalOptions);
+
+    console.log('Running czg with the following command:', czgCommand.join(' '));
+    const czgProcess = spawn('npx', czgCommand, { stdio: 'inherit' });
+
+    czgProcess.on('close', (code) => {
+      if (code === 0) {
+        console.log('Commit created successfully.');
+      } else {
+        console.log('Commit process exited with code:', code);
+      }
+    });
+  } catch (error) {
+    console.error('Error during commit process:', error.message);
+  }
 }

@@ -7,7 +7,8 @@
         "valen": "bin/valen.js"
     },
     "scripts": {
-        "start": "node editor/electron-start.js"
+        "start": "node bin/valen.js",
+        "deploy": "git add . && git commit -m 'Pre-deploy commit' || true && npm version patch && git push && npm publish && npx jsr publish || { echo 'Deployment failed. Please check the errors above.'; exit 1; }"
     },
     "keywords": [
         "react-native",

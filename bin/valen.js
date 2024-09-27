@@ -36,7 +36,7 @@ program
   .option('-r, --rename <name>', 'Rename the project')
   .option('-l, --logs <type>', 'Monitor logs (Metro, iOS, Android, or Reactotron)')
   .option('-f, --fastlane', 'Run Fastlane commands')
-  .option('-g, --git', 'Manage Git')
+  .option('-g, --git [action]', 'Manage Git (lc/lazygit for LazyGit, f/flow for Git Flow, c/commit for AI-assisted commit)')
   .option('-A, --ai', 'Code with AI')
   .option('-b, --browse <what to browse>', 'Automated Browsing')
   .option('-u, --upgrade <type>', 'Upgrade React Native project (web or auto)')
@@ -84,7 +84,7 @@ async function handleCommandLineOptions(options) {
   } else if (options.fastlane) {
     await handleFastlaneOptions();
   } else if (options.git) {
-    await handleGitOptions();
+    await handleGitOptions(options.git === true ? null : options.git);
   } else if (options.browse) {
     await handleAutomatedBrowsing(options.browse);
   }
