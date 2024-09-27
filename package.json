@@ -8,7 +8,7 @@
     },
     "scripts": {
         "start": "node bin/valen.js",
-        "deploy": "git add . && git commit -m 'Pre-deploy commit' || true && npm version patch && git push --set-upstream origin develop || git push && npm publish && npx jsr publish || { echo 'Deployment failed. Please check the errors above.'; exit 1; }"
+        "deploy": "git add . && git commit -m 'Pre-deploy commit' || true && npm version patch && git push --set-upstream origin develop || git push && npm publish && NEW_VERSION=$(node -p \"require('./package.json').version\") && npx jsr publish $NEW_VERSION || { echo 'Deployment failed. Please check the errors above.'; exit 1; }"
     },
     "keywords": [
         "react-native",
