@@ -1,6 +1,6 @@
 {
     "name": "@valen/valen",
-    "version": "1.1.7",
+    "version": "1.1.10",
     "description": "React Native Development Kit CLI",
     "main": "editor/electron-launcher.js",
     "exports": "./editor/electron-launcher.js", 
