@@ -1,5 +1,5 @@
-Valen: React Native Mobile Development Kit
-=============================================
+Valen: React Native Mobile Development Kit & AI Assistant
+===========================================================
 
 Streamline your React Native development environment setup with this powerful automation tool.
 
