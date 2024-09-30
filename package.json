@@ -1,13 +1,19 @@
 {
     "name": "valen",
-    "version": "1.1.7",
+    "version": "1.1.10",
     "description": "React Native Development Kit CLI",
     "main": "editor/electron-launcher.js",
     "bin": {
         "valen": "bin/valen.js"
     },
     "scripts": {
-        "start": "node editor/electron-start.js"
+        "start": "node bin/valen.js",
+        "deploy": "git add . && git commit -m 'Pre-deploy commit' || true && npm version patch && git push --set-upstream origin develop || git push && npm publish && npx jsr publish || { echo 'Deployment failed. Please check the errors above.'; exit 1; }",
+        "push:dev": "git push origin develop:develop || (echo 'This repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the 'pre-push' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks').' && exit 1)",
+        "push:prod": "git push origin master:master || (echo 'This repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the 'pre-push' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks').' && exit 1)",
+        "nodes": "python3.12 utils/cluster/main.py",
+        "nodes:start": "source .venv_3.12/bin/activate && python3.12 utils/cluster/main.py",
+        "valen": "bun bin/valen.js --open"
     },
     "keywords": [
         "react-native",
@@ -49,5 +55,6 @@
     },
     "devDependencies": {
         "@types/inquirer": "^9.0.7"
-    }
+    },
+    "type": "module"
 }

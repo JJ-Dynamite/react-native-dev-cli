@@ -1,4 +1,9 @@
-#!/usr/bin/env node
+#!/usr/bin/env node --experimental-modules
+// Add this line at the top of the file
+// @ts-check
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+
 import figlet from 'figlet';
 import { select, input } from '@inquirer/prompts';
 import { createInterface } from 'readline';
@@ -14,10 +19,13 @@ import { setupSentient } from '../utils/sentientSetup.js'; // Updated path
 import open from 'open';
 import { handleReactNativeUpgrade, handleUpgradeOption } from '../utils/upgrade.js'; // Updated path
 import { handleAutomatedBrowsing } from '../utils/browser.js'; // Updated path
-import { handleGitOptions } from '../utils/git.js'; // Add this import
+import { handleGitOptions } from '../utils/git.js'; // Update this line
 import { handleAiderOptions } from '../utils/aider.js'; // Add this import
-import { exec, spawn } from 'child_process';
+import { exec, spawn, execSync } from 'child_process';
 import { promisify } from 'util';
+import inquirer from 'inquirer';
+
+const execAsync = promisify(exec);
 
 // Add banner
 console.log(figlet.textSync('Valen', { horizontalLayout: 'full' }));
@@ -36,7 +44,7 @@ program
   .option('-r, --rename <name>', 'Rename the project')
   .option('-l, --logs <type>', 'Monitor logs (Metro, iOS, Android, or Reactotron)')
   .option('-f, --fastlane', 'Run Fastlane commands')
-  .option('-g, --git', 'Manage Git')
+  .option('-g, --git [action]', 'Manage Git (lc/lazygit for LazyGit, f/flow for Git Flow, c/commit for AI-assisted commit)')
   .option('-A, --ai', 'Code with AI')
   .option('-b, --browse <what to browse>', 'Automated Browsing')
   .option('-u, --upgrade <type>', 'Upgrade React Native project (web or auto)')
@@ -58,7 +66,14 @@ if (Object.keys(options).length === 0) {
 
 async function handleCommandLineOptions(options) {
   if (options.open) {
-    await openEditor();
+    console.log('Opening Electron editor...');
+    try {
+      await openEditor();
+    } catch (error) {
+      console.error('Failed to open Electron editor:', error.message);
+      console.log('Please try running "bun add electron --dev" manually and then try again.');
+    }
+    return;
   } else if (options.upgrade) {
     await handleUpgradeOption(
       options.upgrade,
@@ -84,7 +99,7 @@ async function handleCommandLineOptions(options) {
   } else if (options.fastlane) {
     await handleFastlaneOptions();
   } else if (options.git) {
-    await handleGitOptions();
+    await handleGitOptions(options.git === true ? null : options.git);
   } else if (options.browse) {
     await handleAutomatedBrowsing(options.browse);
   }
