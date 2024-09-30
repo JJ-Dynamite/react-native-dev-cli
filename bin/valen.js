@@ -1,4 +1,9 @@
-#!/usr/bin/env node
+#!/usr/bin/env node --experimental-modules
+// Add this line at the top of the file
+// @ts-check
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+
 import figlet from 'figlet';
 import { select, input } from '@inquirer/prompts';
 import { createInterface } from 'readline';
@@ -16,8 +21,11 @@ import { handleReactNativeUpgrade, handleUpgradeOption } from '../utils/upgrade.
 import { handleAutomatedBrowsing } from '../utils/browser.js'; // Updated path
 import { handleGitOptions } from '../utils/git.js'; // Update this line
 import { handleAiderOptions } from '../utils/aider.js'; // Add this import
-import { exec, spawn } from 'child_process';
+import { exec, spawn, execSync } from 'child_process';
 import { promisify } from 'util';
+import inquirer from 'inquirer';
+
+const execAsync = promisify(exec);
 
 // Add banner
 console.log(figlet.textSync('Valen', { horizontalLayout: 'full' }));
@@ -58,7 +66,14 @@ if (Object.keys(options).length === 0) {
 
 async function handleCommandLineOptions(options) {
   if (options.open) {
-    await openEditor();
+    console.log('Opening Electron editor...');
+    try {
+      await openEditor();
+    } catch (error) {
+      console.error('Failed to open Electron editor:', error.message);
+      console.log('Please try running "bun add electron --dev" manually and then try again.');
+    }
+    return;
   } else if (options.upgrade) {
     await handleUpgradeOption(
       options.upgrade,
