@@ -116,9 +116,17 @@ valen -u auto --app-name 'bonder' --app-package 'com.bonderconnect.app' --curren
 Video Demo
 ----------
 
-* Android: [![Video Demo](https://img.youtube.com/vi/RctLdGofZOk/0.jpg)](https://youtu.be/RctLdGofZOk)
-* iOS and Cleanup: [![Video Demo](https://img.youtube.com/vi/uJEM3v3oUZM/0.jpg)](https://youtu.be/uJEM3v3oUZM)
-* AI Assistant: [![AI Assistant](https://img.youtube.com/vi/PCoLMqSlg8A/0.jpg)](https://youtu.be/PCoLMqSlg8A)
+- Android:
+
+ [![Video Demo](https://img.youtube.com/vi/RctLdGofZOk/0.jpg)](https://youtu.be/RctLdGofZOk)
+
+- iOS and Cleanup: 
+
+[![Video Demo](https://img.youtube.com/vi/uJEM3v3oUZM/0.jpg)](https://youtu.be/uJEM3v3oUZM)
+
+- AI Assistant:
+
+ [![AI Assistant](https://img.youtube.com/vi/PCoLMqSlg8A/0.jpg)](https://youtu.be/PCoLMqSlg8A)
 
 Contributing
 ------------
